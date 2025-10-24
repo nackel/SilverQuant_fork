@@ -1,13 +1,23 @@
 import datetime
 import logging
 
+from decimal import Decimal, ROUND_HALF_UP
+
+
+IS_DEBUG = False
+
+
+def debug(*args, **kwargs):
+    if IS_DEBUG:
+        print(*args, **kwargs)
+
 
 # pandas dataframe 显示配置优化
 def pd_show_all() -> None:
     import pandas as pd
     pd.set_option('display.width', None)
-    pd.set_option('display.min_rows', 1000)
-    pd.set_option('display.max_rows', 5000)
+    pd.set_option('display.min_rows', 9999)
+    pd.set_option('display.max_rows', 9999)
     pd.set_option('display.max_columns', 200)
     pd.set_option('display.unicode.ambiguous_as_wide', True)
     pd.set_option('display.unicode.east_asian_width', True)
@@ -87,13 +97,16 @@ def code_to_tdxsymbol(code: str) -> str:
 
 
 def tdxsymbol_to_code(tdxsymbol: str) -> str:
-    if tdxsymbol[0] == '0':
+    if len(tdxsymbol) != 7:
+        return tdxsymbol    # 这里先不变，不报错
+    elif tdxsymbol[0] == '0':
         return tdxsymbol[1:7] + '.SZ'
     elif tdxsymbol[0] == '1':
         return tdxsymbol[1:7] + '.SH'
     elif tdxsymbol[0] == '2':
         return tdxsymbol[1:7] + '.BJ'
-    return tdxsymbol    # 这里先不变，不报错
+    else:
+        return tdxsymbol    # 这里先不变，不报错
 
 
 def symbol_to_tdxsymbol(code: str) -> str:
@@ -170,6 +183,12 @@ def is_stock_20cm(code_or_symbol: str | int):
     """ 判断是不是20cm票 """
     code_or_symbol = str(code_or_symbol) if type(code_or_symbol) == int else code_or_symbol
     return code_or_symbol[:2] in ['30', '68']
+
+
+def is_stock_30cm(code_or_symbol: str | int):
+    """ 判断是不是20cm票 """
+    code_or_symbol = str(code_or_symbol) if type(code_or_symbol) == int else code_or_symbol
+    return code_or_symbol[:2] in ['82', '83', '87', '88', '43', '92']
 
 
 def is_stock_cy(code_or_symbol: str | int):
@@ -263,13 +282,16 @@ def get_limiting_up_rate(code_or_symbol: str) -> float:
 
 # 获取涨停价
 def get_limit_up_price(code_or_symbol: str, pre_close: float) -> float:
-    if pre_close == 0:
-        return 0
+    if pre_close is None or pre_close <= 0:
+        return 0.0
 
     limit_rate = get_limiting_up_rate(code_or_symbol)
-    limit = pre_close * limit_rate
-    limit = '%.2f' % limit
-    return float(limit)
+
+    pre_close_dec = Decimal(str(pre_close)).quantize(Decimal('0.00'))
+    limit_price_dec = pre_close_dec * Decimal(str(limit_rate))
+    limit_price_dec = limit_price_dec.quantize(Decimal('0.00'), rounding=ROUND_HALF_UP)
+
+    return float(limit_price_dec)
 
 
 # 获取跌停幅
@@ -284,13 +306,16 @@ def get_limiting_down_rate(code_or_symbol: str) -> float:
 
 # 获取跌停价
 def get_limit_down_price(code_or_symbol: str, pre_close: float) -> float:
-    if pre_close == 0:
-        return 0
+    if pre_close is None or pre_close <= 0:
+        return 0.0
 
     limit_rate = get_limiting_down_rate(code_or_symbol)
-    limit = pre_close * limit_rate
-    limit = '%.2f' % limit
-    return float(limit)
+
+    pre_close_dec = Decimal(str(pre_close)).quantize(Decimal('0.00'))
+    limit_price_dec = pre_close_dec * Decimal(str(limit_rate))
+    limit_price_dec = limit_price_dec.quantize(Decimal('0.00'), rounding=ROUND_HALF_UP)
+
+    return float(limit_price_dec)
 
 
 # TODO
@@ -322,3 +347,42 @@ def time_diff_seconds(later_time: datetime.datetime.time, early_time: datetime.d
     diff_seconds = abs(total_seconds_time1 - total_seconds_time2)
 
     return diff_seconds
+
+
+# 迅投相关数据
+# past_seconds 当日交易日已经过去多少秒，计算量比这类指标需要
+def hms_to_past_seconds(hour: int, minute: int, second: int) -> int:
+    time_int = hour * 100 + minute
+    if time_int < 930:
+        return 0
+    elif 930 <= time_int < 1130:
+        return hour * 3600 + minute * 60 + second - (3600 * 9 + 60 * 30)
+    elif 1130 <= time_int < 1300:
+        return 3600 * 2
+    elif 1300 <= time_int < 1500:
+        return hour * 3600 + minute * 60 + second - (3600 * 13) + 3600 * 2
+    else:
+        return 3600 * 4
+
+
+def xt_time_tag_to_hms(time_tag: str) -> tuple[int, int, int]:
+    dt = datetime.datetime.strptime(time_tag, '%Y%m%d %H:%M:%S')
+    return dt.hour, dt.minute, dt.second
+
+
+def xt_time_tag_to_past_seconds(time_tag: int | str) -> int:
+    hour, minute, second = xt_time_tag_to_hms(str(time_tag))
+    return hms_to_past_seconds(hour, minute, second)
+
+
+# sub_whole 的 quotes 时间格式
+def xt_time_to_hms(timestamp: int) -> tuple[int, int, int]:
+    if len(str(timestamp)) > 10:
+        timestamp = timestamp // 1000
+        dt = datetime.datetime.fromtimestamp(timestamp)
+        return dt.hour, dt.minute, dt.second
+
+
+def xt_time_to_past_seconds(timestamp: int) -> int:
+    hour, minute, second = xt_time_to_hms(timestamp)
+    return hms_to_past_seconds(hour, minute, second)

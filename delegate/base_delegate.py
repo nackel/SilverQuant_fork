@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
 
 
+DEFAULT_STRATEGY_NAME = '空白策略'
+
+
 class BaseDelegate(ABC):
     def __init__(self):
         self.callback = None
@@ -24,7 +27,7 @@ class BaseDelegate(ABC):
         price: float,
         volume: int,
         remark: str,
-        strategy_name: str = 'non-name',
+        strategy_name: str = DEFAULT_STRATEGY_NAME,
     ):
         pass
 
@@ -35,7 +38,7 @@ class BaseDelegate(ABC):
         price: float,
         volume: int,
         remark: str,
-        strategy_name: str = 'non-name',
+        strategy_name: str = DEFAULT_STRATEGY_NAME,
     ):
         pass
 
@@ -46,7 +49,7 @@ class BaseDelegate(ABC):
         price: float,
         volume: int,
         remark: str,
-        strategy_name: str = 'non-name',
+        strategy_name: str = DEFAULT_STRATEGY_NAME,
     ):
         pass
 
@@ -57,18 +60,26 @@ class BaseDelegate(ABC):
         price: float,
         volume: int,
         remark: str,
-        strategy_name: str = 'non-name',
+        strategy_name: str = DEFAULT_STRATEGY_NAME,
     ):
         pass
 
     @abstractmethod
-    def order_cancel_all(self):
+    def order_cancel_all(self, strategy_name: str = DEFAULT_STRATEGY_NAME):
         pass
 
     @abstractmethod
-    def order_cancel_buy(self, code: str):
+    def order_cancel_buy(self, code: str, strategy_name: str = DEFAULT_STRATEGY_NAME):
         pass
 
     @abstractmethod
-    def order_cancel_sell(self, code: str):
+    def order_cancel_sell(self, code: str, strategy_name: str = DEFAULT_STRATEGY_NAME):
         pass
+
+    @staticmethod
+    def is_position_holding(position: any) -> bool:
+        return False
+
+    @abstractmethod
+    def get_holding_position_count(self, positions: list, only_stock: bool = False) -> int:
+        return 0

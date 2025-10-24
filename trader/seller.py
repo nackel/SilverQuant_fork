@@ -1,3 +1,4 @@
+import math
 import datetime
 import logging
 import pandas as pd
@@ -7,13 +8,14 @@ from xtquant.xttype import XtPosition
 
 from delegate.base_delegate import BaseDelegate
 from tools.utils_basic import get_limit_down_price
+from tools.utils_cache import InfoItem
 
 
 class BaseSeller:
     def __init__(self, strategy_name: str, delegate: BaseDelegate, parameters):
         self.strategy_name = strategy_name
         self.delegate = delegate
-        self.order_premium = parameters.order_premium
+        self.order_premium = parameters.order_premium if hasattr(parameters, 'order_premium') else 0.03
 
     def order_sell(self, code, quote, volume, remark, log=True) -> None:
         if volume > 0:
@@ -56,7 +58,7 @@ class BaseSeller:
         curr_date: str,
         curr_time: str,
         positions: List[XtPosition],
-        held_days: Dict[str, int],
+        held_info: Dict[str, Dict],
         max_prices: Dict[str, float],
         cache_history: Dict[str, pd.DataFrame],
         today_ticks: Dict[str, list] = None,
@@ -71,15 +73,28 @@ class BaseSeller:
         for position in positions:
             code = position.stock_code
 
+            if code not in held_info:
+                continue
+
+            if InfoItem.DayCount not in held_info[code]:
+                continue
+
+            if held_info[code][InfoItem.DayCount] is None:
+                continue
+
+            if code not in quotes:
+                continue
+
             # 如果有数据且有持仓时间记录
-            if (code in quotes) and (code in held_days):
+            quote = quotes[code]
+            if quote['open'] > 0 and quote['volume'] > 0:  # 确认当前股票没有停牌
                 self.check_sell(
                     code=code,
-                    quote=quotes[code],
+                    quote=quote,
                     curr_date=curr_date,
                     curr_time=curr_time,
                     position=position,
-                    held_day=held_days[code],
+                    held_day=held_info[code][InfoItem.DayCount],
                     max_price=max_prices[code] if code in max_prices else None,
                     history=cache_history[code] if code in cache_history else None,
                     ticks=today_ticks[code] if code in today_ticks else None,
@@ -92,3 +107,13 @@ class BaseSeller:
         history: Optional[pd.DataFrame], ticks: Optional[list[list]], extra: any,
     ) -> bool:
         return False  # False 表示没有卖过，不阻挡其他Seller卖出
+
+
+class LimitedSeller(BaseSeller):
+    def __init__(self, strategy_name: str, delegate: BaseDelegate, parameters):
+        super().__init__(strategy_name, delegate, parameters)
+        self.order_percent = parameters.order_percent if hasattr(parameters, 'order_percent') else 1.00
+
+    def order_sell(self, code, quote, volume, remark, log=True) -> None:
+        volume = math.floor(volume / 100 * self.order_percent) * 100    # 向下取整
+        super().order_sell(code, quote, volume, remark, log)

@@ -6,8 +6,8 @@ from gmtrade.api import *
 from gmtrade.pb.account_pb2 import Order, ExecRpt, AccountStatus
 
 from tools.utils_basic import gmsymbol_to_code
-from tools.utils_cache import record_deal, new_held, del_key, StockNames
-from tools.utils_ding import DingMessager
+from tools.utils_cache import StockNames, record_deal, new_held, del_key, del_held_day
+from tools.utils_ding import BaseMessager
 
 
 class GmCallback:
@@ -15,7 +15,7 @@ class GmCallback:
         self,
         account_id: str,
         strategy_name: str,
-        ding_messager: DingMessager,
+        ding_messager: BaseMessager,
         disk_lock: threading.Lock,
         path_deal: str,
         path_held: str,
@@ -40,27 +40,33 @@ class GmCallback:
 
     @staticmethod
     def register_callback():
-        # 直接使用当前模块进行注册，不使用filename参数
+        file_name = 'delegate.gm_callback.py'
         try:
-            # file_name = 'delegate.gm_callback.py'
-            # status = start(filename=file_name)
-
-            status = start(filename='__main__')
+            status = start(filename=file_name)
             if status == 0:
-                print(f'[掘金]:使用__main__订阅回调成功')
+                print(f'[掘金]:使用{file_name}订阅回调成功')
             else:
-                print(f'[掘金]:使用__main__订阅回调失败，状态码：{status}')
-        except Exception as e1:
-            print(f'[掘金]:使用__main__订阅回调异常：{e1}')
+                print(f'[掘金]:使用{file_name}订阅回调失败，状态码：{status}')
+        except Exception as e0:
+            print(f'[掘金]:使用{file_name}订阅回调异常：{e0}')
             try:
-                # 如果start()不带参数失败，尝试使用空参数
-                status = start()
+                # 直接使用当前模块进行注册，不使用filename参数
+                status = start(filename='__main__')
                 if status == 0:
-                    print(f'[掘金]:订阅回调成功')
+                    print(f'[掘金]:使用__main__订阅回调成功')
                 else:
-                    print(f'[掘金]:订阅回调失败，状态码：{status}')
-            except Exception as e2:
-                print(f'[掘金]:使用空参数订阅回调也失败：{e2}')
+                    print(f'[掘金]:使用__main__订阅回调失败，状态码：{status}')
+            except Exception as e1:
+                print(f'[掘金]:使用__main__订阅回调异常：{e1}')
+                try:
+                    # 如果start()不带参数失败，尝试使用空参数
+                    status = start()
+                    if status == 0:
+                        print(f'[掘金]:订阅回调成功')
+                    else:
+                        print(f'[掘金]:订阅回调失败，状态码：{status}')
+                except Exception as e2:
+                    print(f'[掘金]:使用空参数订阅回调也失败：{e2}')
 
     @staticmethod
     def unregister_callback():
@@ -102,31 +108,6 @@ class GmCallback:
         """
         pass
 
-        # stock_code = gmsymbol_to_code(rpt.symbol)
-        # traded_volume = rpt.volume
-        # traded_price = float(rpt.price)
-        # traded_time = rpt.created_at.seconds
-
-        # if rpt.side == OrderSide_Buy:
-        #     self.record_order(
-        #         order_time=traded_time,
-        #         code=stock_code,
-        #         price=traded_price,
-        #         volume=traded_volume,
-        #         side='买入成交',
-        #         remark='',
-        #     )
-
-        # if rpt.side == OrderSide_Sell:
-        #     self.record_order(
-        #         order_time=traded_time,
-        #         code=stock_code,
-        #         price=traded_price,
-        #         volume=traded_volume,
-        #         side='卖出成交',
-        #         remark='',
-        #     )
-
     def on_order_status(self, order: Order):
         if order.status == OrderStatus_Rejected:
             self.ding_messager.send_text_as_md(f'订单已拒绝:{order.symbol} {order.ord_rej_reason_detail}')
@@ -137,24 +118,24 @@ class GmCallback:
             traded_price = order.price
 
             if order.side == OrderSide_Sell:
-                del_key(self.disk_lock, self.path_held, stock_code)
+                del_held_day(self.disk_lock, self.path_held, stock_code)
                 del_key(self.disk_lock, self.path_max_prices, stock_code)
                 del_key(self.disk_lock, self.path_min_prices, stock_code)
 
                 name = self.stock_names.get_name(stock_code)
                 self.ding_messager.send_text_as_md(
-                    f'{datetime.datetime.now().strftime("%H:%M:%S")} 卖出成交 {stock_code}\n'
+                    f'{datetime.datetime.now().strftime("%H:%M:%S")} 卖成 {stock_code}\n'
                     f'{name} {traded_volume}股 {traded_price:.2f}元',
-                    '[SELL]')
+                    '[SOLD]')
 
-            if order.side == OrderSide_Buy:
+            elif order.side == OrderSide_Buy:
                 new_held(self.disk_lock, self.path_held, [stock_code])
 
                 name = self.stock_names.get_name(stock_code)
                 self.ding_messager.send_text_as_md(
-                    f'{datetime.datetime.now().strftime("%H:%M:%S")} 买入成交 {stock_code}\n'
+                    f'{datetime.datetime.now().strftime("%H:%M:%S")} 买成 {stock_code}\n'
                     f'{name} {traded_volume}股 {traded_price:.2f}元',
-                    '[BUY]')
+                    '[BOUGHT]')
 
         else:
             print(order.status, order.symbol)

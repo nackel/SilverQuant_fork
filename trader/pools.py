@@ -27,15 +27,14 @@ class StockPool:
         self.refresh_black()
         self.refresh_white()
 
-        print(f'White list refreshed {len(self.cache_whitelist)} codes.')
-        print(f'Black list refreshed {len(self.cache_blacklist)} codes.')
-        print(f'Total list refreshed {len(self.get_code_list())} codes.')
+        print(f'[POOL] White list refreshed {len(self.cache_whitelist)} codes.')
+        print(f'[POOL] Black list refreshed {len(self.cache_blacklist)} codes.')
+        print(f'[POOL] Total list refreshed {len(self.get_code_list())} codes.')
 
         if self.ding_messager is not None:
             self.ding_messager.send_text_as_md(
-                f'[{self.account_id}]{self.strategy_name}:更新{len(self.get_code_list())}支\n'
-                f'白名单: {len(self.cache_whitelist)} '
-                f'黑名单: {len(self.cache_blacklist)}')
+                f'{self.strategy_name}:股票池{len(self.get_code_list())}支\n'
+                f'白名单: {len(self.cache_whitelist)} 黑名单: {len(self.cache_blacklist)}')
 
     def refresh_black(self):
         self.cache_blacklist.clear()
@@ -44,9 +43,9 @@ class StockPool:
         self.cache_whitelist.clear()
 
     # 删除不符合模式和没有缓存的票池
-    def filter_white_list_by_selector(self, selector: Callable, cache_history: dict[str, pd.DataFrame]):
+    def filter_white_list_by_selector(self, filter_func: Callable, cache_history: dict[str, pd.DataFrame]):
         remove_list = []
-        print('filtering...', end='')
+        print('[POOL] Filtering...', end='')
 
         i = 0
         for code in self.cache_whitelist:
@@ -54,8 +53,12 @@ class StockPool:
             if i % 200 == 0:
                 print(f'{i}.', end='')
             if code in cache_history:
-                df = selector(cache_history[code], code, None)  # 预筛公式默认不需要使用quote所以传None
-                if (len(df) > 0) and (not df['PASS'].values[-1]):
+                try:
+                    df = filter_func(cache_history[code], code, None)  # 预筛公式默认不需要使用quote所以传None
+                    if (len(df) > 0) and (not df['PASS'].values[-1]):
+                        remove_list.append(code)
+                except Exception as e:
+                    print(f'[POOL] Drop {code} when filtering: ', e)
                     remove_list.append(code)
             else:
                 remove_list.append(code)
@@ -63,7 +66,7 @@ class StockPool:
         for code in remove_list:
             self.cache_whitelist.discard(code)
 
-        print(f'{len(remove_list)} codes filter out.')
+        print(f'[POOL] {len(remove_list)} codes filter out.')
 
         if self.ding_messager is not None:
             self.ding_messager.send_text_as_md(f'[{self.account_id}]{self.strategy_name}:筛除{len(remove_list)}支\n')
@@ -211,11 +214,15 @@ class StocksPoolWhitePrefixes(StocksPoolBlackWencai):
     def __init__(self, account_id: str, strategy_name: str, parameters, ding_messager):
         super().__init__(account_id, strategy_name, parameters, ding_messager)
         self.white_prefixes = parameters.white_prefixes
+        if hasattr(parameters, 'white_none_st'):
+            self.white_none_st = parameters.white_none_st
+        else:
+            self.white_none_st = False
 
     def refresh_white(self):
         super().refresh_white()
 
-        t_white_codes = get_prefixes_stock_codes(self.white_prefixes)
+        t_white_codes = get_prefixes_stock_codes(self.white_prefixes, self.white_none_st)
         self.cache_whitelist.update(t_white_codes)
 
 

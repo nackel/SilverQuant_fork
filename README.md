@@ -1,22 +1,37 @@
-来跟我大声读三遍：先轻仓模拟。先轻仓模拟？先轻仓模拟！😑
+> 成功的秘诀有三条：
+>
+> 第一，尽量避免风险，保住本金
+>
+> 第二，尽量避免风险，保住本金
+>
+> 第三，坚决牢记第一、二条。
+>
+> —— 沃伦·爱德华·巴菲特 Warren Edward Buffett
+
+---
+
+来跟我大声读三遍：先轻仓模拟。先轻仓模拟？先轻仓模拟！🤤
 
 提问前先看下我辛苦写的说明好不啦，蠢尚可救，懒无药医！🙄
 
 如果觉得好用就给个星星反馈一下，好让作者有动力更新吖！😘
 
+目前暂未建立任何付费分享渠道，请明辨真假，谨防冒牌货！🥸
+
 Github 因某些原因不便境内服务器部署，这里有：[国内镜像](https://gitee.com/silver6wings/silverQuant)
 
 # 鸣谢
 
-> 感谢 [@owen590](https://github.com/owen590) 从第一行代码开始至今提供的宝贵意见
-> 
-> 感谢 [@dominicx](https://github.com/dominicx) 提交的PR，修复作者未覆盖的交易场景
-> 
-> 感谢 [@nackel](https://github.com/nackel) 提交的PR，添加飞书机器人模块的支持
-> 
-> 感谢 [@vipally](https://github.com/vipally) 提交的PR，优化部分MyTT公式和vscode配置
+* 感谢 [@owen590](https://github.com/owen590) 从第一行代码开始至今提供的宝贵意见 
+* 感谢 [@dominicx](https://github.com/dominicx) 提交的PR，修复作者未覆盖的交易场景细节
+* 感谢 [@nackel](https://github.com/nackel) 提交的PR，添加飞书机器人模块的支持
+* 感谢 [@vipally](https://github.com/vipally) 提交的PR，优化部分MyTT公式和vscode配置
 
----
+# 已知问题
+
+`main`分支为开发版本，包含所有最近的更新；`release`分支为稳定版本，作为最近的产品发布。
+
+* 开仓价从`Mini QMT`直接获取，目前不会根据除权情况动态调整，可能会因为除权价格降低导致非正常止损卖出。
 
 # 项目简介
 
@@ -42,6 +57,7 @@ SilverQuant 是基于 [MiniQMT](https://dict.thinktrader.net/nativeApi/start_now
 
 希望您也可以在修罗场里的磨砺中，能打造出属于自己合适的交易模式，共勉
 
+查看完整变更历史：[CHANGELOG.md](CHANGELOG.md)
 
 # 安装说明
 
@@ -203,14 +219,14 @@ Sell Conf 卖点相关的参数
 > * `deal_hist.csv` 里记录的是交易单委托历史
 > 
 > 要在`CACHE_BASE_PATH`对应的目录里查看缓存是否正确，可以参考如下：
-> * `held_days.json` 里记录的是持仓天数
+> * `positions.json` 里记录的是持仓天数
 > * `max_price.json` 里记录的是历史最高价格
 
 ## 设计理念
 
 以下为架构示意图，帮助二次开发的朋友们更好地理解和快速上手
 
-![image](https://github.com/silver6wings/SilverQuant/blob/main/imgs/architecture.png)
+![image](_imgs/architecture.png)
 
 ---
 
@@ -225,11 +241,14 @@ Sell Conf 卖点相关的参数
 由于 QMT 针对单个操作系统 instance 只能单开，所以每次尽可能只 run 一个策略，以防冲突。
 
 ```
-run_wencai.py
+run_wencai_qmt.py
 利用同花顺问财大模型选股买入，
 需自行定义prompt选股问句，在`selector/select_wencai.py`中定义
 可以用来快速建立原型，做模拟盘测试，预估大致收益，一般至少测试一个月
 如果需要复杂卖出策略，需要参考`run_remote.py`加入下载历史数据代码
+
+run_wencai_tdx.py
+使用问财和通达信的数据源，可以脱离QMT客户端运行模拟盘
 ```
 ```
 run_remote.py
@@ -243,6 +262,10 @@ run_shield.py
 ```
 run_swords.py
 票池打板的模板，当封板且满足封板要求的时候进行买入，需要优化
+```
+```
+run_swords_tdx.py
+票池打板的模板，同上，只不过票池是读取本地通达信的自选股列表
 ```
 ```
 run_ai_gen.py
@@ -396,11 +419,6 @@ About mytt
 
 ---
 
-# 已知问题
-
-* 持仓价从QMT直接获取，目前尚不清楚是否会根据除权情况动态调整
-* Daily history 模块目前尚未加入除权相关的数据更新机制，定期删除_daily文件夹可以保持数据一致性
-
 # 免责声明
 
 本项目遵循 Apache 2.0 开原许可协议
@@ -420,5 +438,3 @@ About mytt
 带着你的Star和Github的ID添加作者的WX工作号: `junchaoyu_`
 
 这里有卧虎藏龙的技术支持群讨论各种问题，欢迎各路英雄好汉
-
-PS: 目前暂未建立任何付费分享渠道，请明辨真假，谨防冒牌货

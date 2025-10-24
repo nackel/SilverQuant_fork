@@ -1,24 +1,30 @@
+import sys
 import time
+import datetime
 from threading import Thread
 from typing import List, Optional
 
-from xtquant import xtconstant
+from xtquant import xtconstant, xtdata
 from xtquant.xtconstant import STOCK_BUY, STOCK_SELL
-from xtquant.xtdata import get_client, get_full_tick
 from xtquant.xttrader import XtQuantTrader
 from xtquant.xttype import StockAccount, XtPosition, XtOrder, XtAsset
 
 from credentials import *
-from tools.utils_basic import get_code_exchange
+from tools.utils_basic import get_code_exchange, is_stock
+from tools.utils_cache import StockNames, check_open_day
+from tools.utils_ding import BaseMessager
+
 from delegate.base_delegate import BaseDelegate
 from delegate.xt_callback import XtDefaultCallback
+if 'delegate.xt_subscriber' not in sys.modules:
+    from delegate.xt_subscriber import XtSubscriber
 
 
-default_client_path = QMT_CLIENT_PATH
-default_account_id = QMT_ACCOUNT_ID
+DEFAULT_RECONNECT_SECONDS = 60
+DEFAULT_XT_STRATEGY_NAME = '默认策略'
 
-default_reconnect_duration = 60
-default_wait_duration = 15
+DEFAULT_CLIENT_PATH = QMT_CLIENT_PATH
+DEFAULT_ACCOUNT_ID = QMT_ACCOUNT_ID
 
 
 class XtDelegate(BaseDelegate):
@@ -28,17 +34,23 @@ class XtDelegate(BaseDelegate):
         client_path: str = None,
         callback: object = None,
         keep_run: bool = True,
+        ding_messager: BaseMessager = None,
+        account_type: str = 'STOCK',
     ):
         super().__init__()
-        self.xt_trader: Optional[XtQuantTrader] = None
+        self.ding_messager = ding_messager
+        self.stock_names = StockNames()
+        self.subscriber: Optional[XtSubscriber] = None  # 数据代理
+        self.xt_trader: Optional[XtQuantTrader] = None  # 交易代理
+        self.is_open_day = True  # 默认当前是交易日
 
         if client_path is None:
-            client_path = default_client_path
+            client_path = DEFAULT_CLIENT_PATH
         self.path = client_path
 
         if account_id is None:
-            account_id = default_account_id
-        self.account = StockAccount(account_id=account_id, account_type='STOCK')
+            account_id = DEFAULT_ACCOUNT_ID
+        self.account = StockAccount(account_id=account_id, account_type=account_type)
         self.callback = callback
         self.connect(self.callback)
         if keep_run:
@@ -82,21 +94,22 @@ class XtDelegate(BaseDelegate):
         return self.xt_trader, True
 
     def reconnect(self) -> None:
-        if self.xt_trader is None:
+        if self.xt_trader is None and self.is_open_day:  # 仅在交易日重连
             print('开始重连交易接口')
             _, success = self.connect(self.callback)
             if success:
                 print('交易接口重连成功')
+                if self.subscriber is not None:
+                    self.subscriber.resubscribe_tick(True)
         # else:
         #     print('无需重连交易接口')
-        #     pass
 
     def keep_connected(self) -> None:
         while True:
-            time.sleep(default_reconnect_duration)
+            time.sleep(DEFAULT_RECONNECT_SECONDS)
             self.reconnect()
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         self.xt_trader.stop()
         self.xt_trader = None
 
@@ -200,26 +213,34 @@ class XtDelegate(BaseDelegate):
         price: float,
         volume: int,
         remark: str,
-        strategy_name: str = 'non-name',
+        strategy_name: str = DEFAULT_XT_STRATEGY_NAME,
     ):
-        price_type = xtconstant.LATEST_PRICE
-
         if get_code_exchange(code) == 'SZ':
             price_type = xtconstant.MARKET_SZ_CONVERT_5_CANCEL
-            price = -1
-        if get_code_exchange(code) == 'SH':
+            price_submit = -1
+        elif get_code_exchange(code) == 'SH':
             price_type = xtconstant.MARKET_PEER_PRICE_FIRST
-            price = price
+            price_submit = price
+        else:
+            price_type = xtconstant.LATEST_PRICE
+            price_submit = price
 
         self.order_submit(
             stock_code=code,
             order_type=xtconstant.STOCK_BUY,
             order_volume=volume,
             price_type=price_type,
-            price=price,
+            price=price_submit,
             strategy_name=strategy_name,
             order_remark=remark,
         )
+
+        if self.ding_messager is not None:
+            name = self.stock_names.get_name(code)
+            self.ding_messager.send_text_as_md(
+                f'{datetime.datetime.now().strftime("%H:%M:%S")} 市买 {code}\n'
+                f'{name} {volume}股 {price:.2f}元',
+                '[MB]')
 
     def order_market_close(
         self,
@@ -227,26 +248,34 @@ class XtDelegate(BaseDelegate):
         price: float,
         volume: int,
         remark: str,
-        strategy_name: str = 'non-name',
+        strategy_name: str = DEFAULT_XT_STRATEGY_NAME,
     ):
-        price_type = xtconstant.LATEST_PRICE
-
         if get_code_exchange(code) == 'SZ':
             price_type = xtconstant.MARKET_SZ_CONVERT_5_CANCEL
-            price = -1
-        if get_code_exchange(code) == 'SH':
+            price_submit = -1
+        elif get_code_exchange(code) == 'SH':
             price_type = xtconstant.MARKET_PEER_PRICE_FIRST
-            price = price
+            price_submit = price
+        else:
+            price_type = xtconstant.LATEST_PRICE
+            price_submit = price
 
         self.order_submit(
             stock_code=code,
             order_type=xtconstant.STOCK_SELL,
             order_volume=volume,
             price_type=price_type,
-            price=price,
+            price=price_submit,
             strategy_name=strategy_name,
             order_remark=remark,
         )
+
+        if self.ding_messager is not None:
+            name = self.stock_names.get_name(code)
+            self.ding_messager.send_text_as_md(
+                f'{datetime.datetime.now().strftime("%H:%M:%S")} 市卖 {code}\n'
+                f'{name} {volume}股 {price:.2f}元',
+                '[MS]')
 
     def order_limit_open(
         self,
@@ -254,7 +283,7 @@ class XtDelegate(BaseDelegate):
         price: float,
         volume: int,
         remark: str,
-        strategy_name: str = 'non-name',
+        strategy_name: str = DEFAULT_XT_STRATEGY_NAME,
     ):
         self.order_submit(
             stock_code=code,
@@ -266,13 +295,20 @@ class XtDelegate(BaseDelegate):
             order_remark=remark,
         )
 
+        if self.ding_messager is not None:
+            name = self.stock_names.get_name(code)
+            self.ding_messager.send_text_as_md(
+                f'{datetime.datetime.now().strftime("%H:%M:%S")} 限买 {code}\n'
+                f'{name} {volume}股 {price:.2f}元',
+                '[LB]')
+
     def order_limit_close(
         self,
         code: str,
         price: float,
         volume: int,
         remark: str,
-        strategy_name: str = 'non-name',
+        strategy_name: str = DEFAULT_XT_STRATEGY_NAME,
     ):
         self.order_submit(
             stock_code=code,
@@ -283,6 +319,13 @@ class XtDelegate(BaseDelegate):
             strategy_name=strategy_name,
             order_remark=remark,
         )
+
+        if self.ding_messager is not None:
+            name = self.stock_names.get_name(code)
+            self.ding_messager.send_text_as_md(
+                f'{datetime.datetime.now().strftime("%H:%M:%S")} 限卖 {code}\n'
+                f'{name} {volume}股 {price:.2f}元',
+                '[LS]')
 
     # # 已报
     # ORDER_REPORTED = 50
@@ -293,60 +336,109 @@ class XtDelegate(BaseDelegate):
     # # 部撤
     # ORDER_PART_CANCEL = 53
 
-    def order_cancel_all(self):
+    def order_cancel_all(self, strategy_name: str = DEFAULT_XT_STRATEGY_NAME):
         orders = self.check_orders(cancelable_only=True)
         for order in orders:
             self.order_cancel_async(order.order_id)
 
-    def order_cancel_buy(self, code: str):
+        if self.ding_messager is not None:
+            self.ding_messager.send_text_as_md(
+                f'{datetime.datetime.now().strftime("%H:%M:%S")} 全撤\n'
+                '[CA]')
+
+    def order_cancel_buy(self, code: str, strategy_name: str = DEFAULT_XT_STRATEGY_NAME):
         orders = self.check_orders(cancelable_only=True)
         for order in orders:
             if order.stock_code == code and order.order_type == STOCK_BUY:
                 self.order_cancel_async(order.order_id)
 
-    def order_cancel_sell(self, code: str):
+        if self.ding_messager is not None:
+            self.ding_messager.send_text_as_md(
+                f'{datetime.datetime.now().strftime("%H:%M:%S")} 撤买 {code}\n'
+                '[CB]')
+
+    def order_cancel_sell(self, code: str, strategy_name: str = DEFAULT_XT_STRATEGY_NAME):
         orders = self.check_orders(cancelable_only=True)
         for order in orders:
             if order.stock_code == code and order.order_type == STOCK_SELL:
                 self.order_cancel_async(order.order_id)
+
+        if self.ding_messager is not None:
+            self.ding_messager.send_text_as_md(
+                f'{datetime.datetime.now().strftime("%H:%M:%S")} 撤卖 {code}\n'
+                '[CS]')
 
     def check_ipo_data(self) -> dict:
         if self.xt_trader is not None:
             return self.xt_trader.query_ipo_data()
         else:
             raise Exception('xt_trader为空')
-        
+
     def check_new_purchase_limit(self) -> dict:
         if self.xt_trader is not None:
             return self.xt_trader.query_new_purchase_limit(self.account)
         else:
             raise Exception('xt_trader为空')
 
+    @check_open_day
+    def purchase_ipo_stocks(self, buy_type: str = 'ALL'):
+        """
+        申购新股，可自行定时运行
+        :param buy_type: 'ALL' 申购所有新股，'STOCK' 只申购新股不申购新债
+        :return: 返回申购的新股列表
+        """
+        selections = {}
+        if self.xt_trader is not None:
+            ipodata = self.xt_trader.query_ipo_data()
+            limit_info = self.xt_trader.query_new_purchase_limit(self.account)
+        else:
+            return selections
 
-def is_position_holding(position: XtPosition) -> bool:
-    return position.volume > 0
+        for code in ipodata:
+            issuePrice = ipodata[code]['issuePrice']
+            market = code[-2:]
+            if market not in limit_info:
+                continue
+            if buy_type == 'STOCK' and ipodata[code]['type'] == 'BOND':
+                continue
+            volume = min(ipodata[code]['maxPurchaseNum'], limit_info[market])
+            if volume <= 0:
+                continue
+            selection = {
+                'volume': volume,
+                'name': ipodata[code]['name'],
+                'type': ipodata[code]['type'],
+                'issuePrice': issuePrice,
+            }
+            self.stock_names._data[code] = ipodata[code]['name']  # 临时加入股票名称缓存
+            self.order_limit_open(code, issuePrice, volume, '新股申购')
+            selections['code'] = selection
+        return selections
+    
+    @staticmethod
+    def is_position_holding(position: XtPosition) -> bool:
+        return position.volume > 0
 
+    def get_holding_position_count(self, positions: List[XtPosition], only_stock: bool = False) -> int:
+        if only_stock:
 
-def get_holding_position_count(positions: List[XtPosition]) -> int:
-    return sum(1 for position in positions if is_position_holding(position))
+            return sum(1 for position in positions
+                       if self.is_position_holding(position) and is_stock(position.stock_code))
+        else:
+            return sum(1 for position in positions
+                       if self.is_position_holding(position))
 
 
 def xt_stop_exit():
     import time
-    client = get_client()
+    client = xtdata.get_client()
     while True:
-        time.sleep(default_wait_duration)
+        time.sleep(15)  # 默认15秒之后断开
         if not client.is_connected():
             print('行情服务连接断开...')
 
 
-def xt_get_ticks(code_list: list[str]):
-    # http://docs.thinktrader.net/pages/36f5df/#%E8%8E%B7%E5%8F%96%E5%85%A8%E6%8E%A8%E6%95%B0%E6%8D%AE
-    return get_full_tick(code_list)
-
-
-if __name__ == '__main__':
-    # my_delegate = XtDelegate()
-    # my_delegate.xt_trader.run_forever()
-    # my_delegate.xt_trader.stop()
-    print(xt_get_ticks(['000001.SZ']))
+def download_sector_data():
+    """解决板块数据下载卡顿问题"""
+    client = xtdata.get_client()
+    client.down_all_sector_data()  
